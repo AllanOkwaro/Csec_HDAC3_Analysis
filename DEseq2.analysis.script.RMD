@@ -1,0 +1,349 @@
+---
+title: "Analysis of HDAC3 silencing experiment data"
+Author: Louis Allan Okwaro
+output:
+  html_document:
+    df_print: paged
+  html_notebook: default
+  pdf_document: default
+  word_document: default
+---
+
+#### Load Libraries
+
+All libraries are loaded here. Make sure you load the libraries before starting. Otherwise, install missing libraries from Bioconductor before loading
+
+```{r}
+#if (!require("BiocManager", quietly = TRUE))
+    #install.packages("BiocManager")
+#BiocManager::install("DESeq2")
+library(DESeq2)
+library(matrixStats)
+library(dplyr)
+library(readxl)
+library(readr)
+library(writexl)
+library(NetSci)
+library(cowplot)
+library(ggplot2)
+library("gridExtra")
+library(ggrepel)
+```
+
+#### Data importation into R, sub-setting and creation of design table
+
+Firstly, I imported the data into R and created a Design table which contains the row names as the sample identities and the column names as treatment.
+
+```{r}
+setwd("G:/My Drive/Ph.D_WORK/R files/analysis.of.hadc3.dataset")
+Counts <- read.csv("HDAC3_readcountstable.csv", header = T, sep = ",", row.names = 1)
+Counts <- as.matrix(Counts) # DESeq expects raw data as matrix integer values
+treatments <- c(rep("control", 1), rep("sham", 1), rep("target", 2), rep("sham", 2), 
+                             rep("target", 2), rep("sham", 1), rep("control", 2))
+Design <- as.data.frame(cbind(treatments))
+row.names(Design) <- colnames(Counts)
+Design
+```
+
+#### Analysis of the data using DESeq()
+
+The first command is a DESeq2 specific command DESeqDataSetFromMatrix that require information on countData, colData and design and creates the RangedSummarizedExperiment object on which analysis are carried out on DEseq2.
+
+```{r}
+dds <- DESeqDataSetFromMatrix(countData = Counts, colData = Design, 
+                              design = ~ treatments)
+dds
+keep <- rowSums(counts(dds)) >= 10 # removes all rows with less than 10 
+# read totals. More strict filtering is automatically applied during analysis 
+# via independent filtering on the mean of normalized counts within the
+# results function
+dds <- dds[keep,]
+dds
+```
+
+Analysis of count data and estimation of size factors, dispersion, gene-wise dispersion estimates, mean-dispersion estimates, final dispersion estimates and fits a model then tests the model
+
+```{r}
+dds <- DESeq(dds) # analyses the data
+```
+
+#### PCA clustering of the samples
+
+PCA clustering on the total dataset to check if the samples cluster according to the expectations of the experimental design. I used the regularized log transformation of the data before performing the PCA plots
+
+```{r}
+rld <- rlogTransformation(dds)
+```
+
+Plotting PCA based on rld data
+
+```{r}
+pdf(file = "G:/My Drive/Ph.D_WORK/RNAi results//HDAC3/Plots/2023.09.28 hdac3_pca_plot.pdf",
+    width = 9, height = 6)
+data_rld <- plotPCA(rld, intgroup=c("treatments"),returnData = T)
+percentVar_rld <-round(100*attr(data_rld,"percentVar"))
+ggplot(data = data_rld,aes(x = PC1,y=PC2)) + geom_point(aes(shape = treatments, colour = treatments), size = 3) + scale_shape_manual(values = c(17, 18, 19)) + scale_color_manual(values = c("black", "red", "blue"))+  xlab(paste0("PC1: ",percentVar_rld[1],"% variance")) +
+  ylab(paste0("PC2: ",percentVar_rld[2],"% variance"))
+dev.off()
+```
+
+#### DEGs analysis according to different treatment comparisons target vs sham, target vs control
+
+PC1 separates the treated target group from the nonsense and untreated groups
+
+```{r}
+res <- results(dds, contrast = c("treatments", "target", "sham"))
+res
+res1 <- results(dds, contrast = c("treatments", "sham", "control"))
+res1
+res2 <- results(dds, contrast = c("treatments", "target","control"))
+```
+
+Then we extracted the results from the analysis which had significant difference
+
+```{r}
+datares <- data.frame(cbind(res@rownames,res$baseMean,
+res@listData[["log2FoldChange"]],res$lfcSE,res$stat,res$pvalue,res$padj))
+datares <- na.omit(datares)
+#write.csv(datares, "G:/My Drive/Ph.D_WORK/RNAi results//HDAC3/Tables/2023.05.22 HDAC3.expressed.genes1.csv")
+# I extracted the significant results representing the differentially 
+# expressed genes
+res_sig <- subset(res, padj < 0.05)
+data.res.sig <- data.frame(cbind(res_sig@rownames, res_sig$baseMean, 
+                                 res_sig@listData[["log2FoldChange"]], 
+                                 res_sig$lfcSE, res_sig$stat,res_sig$pvalue,
+                                 res_sig$padj))
+#write.csv(data.res.sig, 'G:/My Drive/Ph.D_WORK/RNAi results//HDAC3/Tables/hdac3_degs1.csv') # save csv file with degs between
+# target group and 
+### nonsense vs. sham
+datares1 <-  data.frame(cbind(res1@rownames,res1$baseMean,
+res1@listData[["log2FoldChange"]],res1$lfcSE,res1$stat,res1$pvalue,res1$padj))
+datares1 <- na.omit(datares1)
+#write.csv(datares1, "G:/My Drive/Ph.D_WORK/RNAi results//HDAC3/Tables/2023.05.22 HDAC3.expressed.genes sham vs control.csv")
+res_sig1 <- subset(res1, padj < 0.05)
+data.res.sig1 <- data.frame(cbind(res_sig1@rownames, res_sig1$baseMean, 
+                                 res_sig1@listData[["log2FoldChange"]], 
+                                 res_sig1$lfcSE, res_sig1$stat,res_sig1$pvalue,
+                                 res_sig1$padj))
+#write.csv(data.res.sig1, 'G:/My Drive/Ph.D_WORK/RNAi results//HDAC3/Tables/2023.11.17 hdac3_degs_sham.unt.csv')
+datares2 <-  data.frame(cbind(res2@rownames,res2$baseMean,
+res2@listData[["log2FoldChange"]],res2$lfcSE,res2$stat,res2$pvalue,res2$padj))
+datares2 <- na.omit(datares2)
+#write.csv(datares2, "G:/My Drive/Ph.D_WORK/RNAi results//HDAC3/Tables/2023.05.22 HDAC3.expressed.genes target vs control.csv")
+res_sig2 <- subset(res2, padj < 0.05)
+data.res.sig2 <- data.frame(cbind(res_sig2@rownames, res_sig2$baseMean, 
+                                 res_sig2@listData[["log2FoldChange"]], 
+                                 res_sig2$lfcSE, res_sig2$stat,res_sig2$pvalue,
+                                 res_sig2$padj))
+#write.csv(data.res.sig2, 'G:/My Drive/Ph.D_WORK/RNAi results//HDAC3/Tables/2023.11.17 hdac3_degs_target.unt.csv')
+```
+
+Then we plotted the expressed genes and show the direction of expression and whether they are significantly expressed (blue) or not (red)
+
+```{r}
+hdac3dat <- read.csv("G:/My Drive/Ph.D_WORK/RNAi results/HDAC3/Tables/2023.05.22 HDAC3.expressed.genes1.csv")
+hdac3dat$sig <- ifelse(hdac3dat$padj <= 0.05, "yes","no")
+
+ggplot(hdac3dat, aes(x = log10(baseMean), y =Log2FoldChange , color = sig)) +
+geom_point() + theme_minimal()
+ggplot(hdac3dat, aes(x = Log2FoldChange, y = -log10(padj), color= sig)) + geom_point() + theme_minimal() + geom_vline(xintercept=c(-0.6, 0.6), col="red") +
+geom_hline(yintercept=-log10(0.05), col="red")
+```
+
+```{r}
+hdac3dat$DEGs <- "Normal"
+hdac3dat$DEGs[hdac3dat$Log2FoldChange > 0.6 & hdac3dat$padj < 0.05] <- "Up"
+hdac3dat$DEGs[hdac3dat$Log2FoldChange < -0.6 & hdac3dat$padj < 0.05] <- "Down"
+p <- ggplot(data=hdac3dat, aes(x=Log2FoldChange, y=-log10(padj),
+col=DEGs)) + geom_point() + theme_minimal()
+p
+p2 <- p + geom_vline(xintercept=c(-0.6, 0.6), col="black") +
+geom_hline(yintercept=-log10(0.05), col="black") # adds line
+p2
+```
+
+Change colors of the vectors if need be
+
+```{r}
+mycolors <- c("red", "blue", "grey")
+names(mycolors) <- c("Down", "Up", "Normal")
+p3 <- p2 + scale_colour_manual(values = mycolors)
+p3
+```
+
+```{r}
+hdac3dat$hdac3label <- NA
+hdac3dat$hdac3label[hdac3dat$DEGs != "NO"] <- hdac3dat$GeneID [hdac3dat$DEGs != "NO"]
+# then plot again
+ggplot(data=hdac3dat, aes(x=Log2FoldChange, y=-log10(padj), col=DEGs,
+label=hdac3label)) + geom_point() + theme_minimal() #+
+#geom_text()
+```
+
+Reduce the amount of labeling to avoid overlaps
+
+```{r}
+library(ggrepel)
+pdf(file = "G:/My Drive/Ph.D_WORK/RNAi results//HDAC3/Plots/2023.09.28 hdac3.vol.plot.pdf", width = 10, height = 8)
+options(ggrepel.max.overlaps = 10)
+ggplot(data=hdac3dat, aes(x=Log2FoldChange, y=-log10(padj),
+col=DEGs, label=hdac3label)) +geom_point() + theme_minimal() + scale_color_manual(values=c("red", "grey", "darkgreen")) +
+geom_vline(xintercept=c(-0.6,0.6), col="red") +
+geom_hline(yintercept=-log10(0.05), col="red")
+```
+
+#### Linking DEGs (tar_non) to protein annotations
+
+```{r}
+library(dplyr)
+gi_pi_data <- read.csv("G:/My Drive/Ph.D_WORK/R files/analysis.of.hadc3.dataset/csec_merged_genes_and_ptn_ids.csv",header = T, sep = ",")
+deg_data <- read.csv("G:/My Drive/Ph.D_WORK/RNAi results/HDAC3/Tables/2023.05.22 degs between tar_non.csv", header = T, sep = ",")
+degs_ann <- dplyr::left_join(deg_data,gi_pi_data, by ="GeneID" )
+#write.csv(degs_ann,"G:/My Drive/Ph.D_WORK/RNAi results//HDAC3/Tables/2023.05.23 hdac3_anno_degs_tar_non.csv")
+```
+
+## Extracting genes of known functions from the DEGs and performing enrichment tests for the extracted sets of genes
+
+#### Old sub-network genes
+
+```{r}
+hdac3.degs <- read.csv("G:/My Drive/Ph.D_WORK/RNAi results/HDAC3/Tables/2023.05.23 hdac3_annotated_degs_private_tar_non.csv")
+osg <- read.csv("G:/My Drive/Ph.D_WORK/R files/analysis.of.hadc3.dataset/deg/Old_subnetwork_genes_Queens_kings_workers_c_sec/Old_subnetwork_genes_kuhn_et_al_2021.csv")
+osg1 <- unique(osg) # remove duplicated gene names
+osg.in.hdac3.degs <- dplyr::inner_join(osg1,hdac3.degs,by="GeneID")
+#write.csv(osg.in.hdac3.degs,"G:/My Drive/Ph.D_WORK/RNAi results/HDAC3/Tables/2023.05.25 Old subnetwork genes among the hdac3 private_tar_non_degs.csv")
+gene.expressed <- read.csv("G:/My Drive/Ph.D_WORK/RNAi results/HDAC3/Tables/2023.05.22 HDAC3.expressed.genes1.csv")
+osg.in.all.exp.genes <- dplyr::inner_join(osg1,gene.expressed,by="GeneID")
+```
+
+#### Fischer's exact test for osg observed among the HDAC3 tar_non private degs
+
+```{r}
+75 # upregulated old subnetwork genes
+995 # osgs expressed among the expressed genes
+867-75 # upregulated genes but not osg
+995-75 # osg but not upregulated
+12522 - (995+792)
+
+tar_osg_up <- data.frame("osg" = c(75,920),"not.osg" = c(792,10735),
+                  row.names = c("upregulated", "Not.upregulated"),
+                  stringsAsFactors = FALSE)
+fisher.test(tar_osg_up)
+
+44 # upregulated old subnetwork genes
+995 # osgs expressed among the expressed genes
+995- 44 # osg but not upregulated
+582-44 # upregulated genes but not osg
+12522 - (995+538) # not osg and not upregulated
+
+tar.down <- data.frame("osg" = c(44,951), "not.osg" = c(538,10989),
+                  row.names = c("upregulated", "not.upregulated"),
+                  stringsAsFactors = FALSE)
+fisher.test(tar.down)
+```
+
+#### Transposbale elements related genes in the HDAC3 DEGs
+
+```{r}
+df1 <- read.csv("G:/My Drive/Ph.D_WORK/RNAi results/HDAC3/Tables/2023.05.23 hdac3_annotated_degs_private_tar_non.csv", header = T,
+         sep = ",")
+df2 <- read.csv("G:/My Drive/Ph.D_WORK/RNAi results/HDAC3/Tables/2023.09.12 Transposable elements in C.sec.csv", header = T,
+                sep = ",")
+library(dplyr)
+colnames(df1)[1] <- "Csec_ID"
+df3 <- dplyr::semi_join(df1,df2,by="Csec_ID")
+
+write.csv(df3, "G:/My Drive/Ph.D_WORK/RNAi results/HDAC3/Tables/2023.09.12Transposable elements in hdac3 tar_non private degs.csv")
+df4 <- read.csv("G:/My Drive/Ph.D_WORK/RNAi results/HDAC3/Tables/2023.05.22 HDAC3.expressed.genes1.csv")
+colnames(df4)[1] <- "Csec_ID"
+df5 <- dplyr::inner_join(df2,df4,by="Csec_ID")
+write.csv(df5, "G:/My Drive/Ph.D_WORK/RNAi results/HDAC3/Tables/2023.09.12 Transposable elements among all the expressed genes in hdac3 experiment.csv")
+```
+
+#### Fishers test for TEs and TE related genes
+
+```{r}
+37 # upregulated TEs
+439-37 # TEs but not upregulated
+867-37 # upregulated but not TEs
+12522- (439+830) # Not upregulated and not TEs
+
+teup <- data.frame("TEs" = c(37,402), "Not_TEs" = c(830,11253),
+                  row.names = c("Up", "Not_up"),
+                  stringsAsFactors = FALSE)
+fisher.test(teup, B = 1000) # The result of this if significant, means that what we observe is not more than what you would expect to see by chance.
+
+tedown <- data.frame("TEs" = c(6,403), "Not_TEs" = c(576,11537),
+                  row.names = c("down", "Not_down"),
+                  stringsAsFactors = FALSE)
+fisher.test(tedown, B = 1000) ## if significant, it means, the genes are less than what you expect to observe by chance
+
+```
+
+#### Heatmap for TJ-I-LiFe network genes
+
+I want to extract the TI-J-LiFe network genes from the DEGs and plot them on a Heat map. The comparisons should be between Target vs sham, target vs control and non vs control
+
+```{r}
+df1 <- read.csv("G:/My Drive/Ph.D_WORK/RNAi results/HDAC3/Tables/2023.05.22 HDAC3.expressed.genes1.csv", header = T)
+tj.life <- read_excel("Tables/2024.02.13 TI-J-LiFe original.xlsx", sheet = 2)
+head(tj.life)
+tj.life.df1 <- dplyr::inner_join(tj.life,df1,by="GeneID")
+head(tj.life.df1)
+unique(tj.life.df1$GeneID)
+df <- subset(tj.life.df1, select= -c(baseMean,lfcSE,stat,pvalue))
+df1 <- read.csv("G:/My Drive/Ph.D_WORK/RNAi results/HDAC3/Tables/2023.05.22 HDAC3.expressed.genes1.csv", header = TRUE)
+df2 <- read.csv("G:/My Drive/Ph.D_WORK/RNAi results/HDAC3/Tables/2023.05.22 HDAC3.expressed.genes target vs control.csv", header = TRUE)
+df3 <- read.csv("G:/My Drive/Ph.D_WORK/RNAi results/HDAC3/Tables/2023.05.22 HDAC3.expressed.genes sham vs control.csv", header = TRUE)
+tj.life <- tj.life %>%
+  distinct(GeneID, .keep_all = TRUE)
+tj.life.df1 <- dplyr::inner_join(tj.life, df1, by = "GeneID")
+#df <- subset(tj.life.df1, select = -c(baseMean, lfcSE, stat, pvalue))
+# Filter rows with padj values below 0.05
+#df_filtered <- filter(df, padj < 0.05)
+tj.life.df2 <- dplyr::inner_join(tj.life,df2,by="GeneID")
+head(tj.life.df2)
+tj.life.df3 <- dplyr::inner_join(tj.life,df3,by="GeneID")
+df4 <- rbind(tj.life.df1,tj.life.df2,tj.life.df3)
+df4$comparison <- factor(df4$comparison)
+#write_xlsx(df4,"Tables/2024.04.15 heatmap_genes.xlsx")
+df4 <- read_excel("Tables/2024.04.15 heatmap_genes.xlsx")
+df4 <- df4[!is.na(df4$comparison),]
+head(df4)
+unique(df4$comparison)
+
+df4$comparision <- factor(df4$comparison, 
+                        c("Target vs Sham", 
+                          "Targte vs Control", 
+                          "Sham vs Control"))
+g <- read_excel("Tables/2024.02.13 TI-J-LiFe original.xlsx", sheet = 2)
+unique(g)
+df4$geneName <- factor(df4$geneName, levels = rev(unique(df4$geneName)), ordered=TRUE)
+subData <- df4 %>% filter(`Category` == "Fecundity" |`Category` == "JH"|`Category` == "IIS"|`Category` == "CHC synthesis" )
+```
+
+#### Plotting the heatmap using TJ-I-LiFe network gene among DEGs for the three comparisons
+
+```{r}
+head(subData)
+subData$Category <- factor(subData$Category, levels = c("IIS", "JH", "Fecundity"))
+pdf(file = "G:/My Drive/Ph.D_WORK/RNAi results/HDAC3/Plots/2024.04.15 Heatmap for ISS-JH and Fecundity.pdf",
+    width = 10, height = 6)
+subData %>% ggplot(aes(x = comparison, y = geneName, fill = as.numeric(Log2FoldChange))) +
+  geom_tile(aes(width = 1, height = 1), color = "white") +
+  scale_fill_gradient2(low = "blue", high = "red", mid = "white", 
+                       midpoint = 0, space = "Lab", name = "") +
+  theme_minimal() +
+  geom_text(aes(label = ifelse(padj < 0.0005, "<0.001", round(padj, digits = 3))),
+            color = "black", size = 4) +
+  geom_text(data = subset(subData, padj < 0.050 & padj >= 0.000005),
+            aes(x = comparison, y = geneName, label = "*"),
+            color = "black", size = 8, position = position_nudge(x = -0.2)) +
+  xlab("") + ylab("") +
+  facet_grid(rows = vars(`Category`), space = "free", scales = "free") +
+  theme(axis.text.x = element_text(face = "bold", size = 10)) +
+  theme(axis.text.y = element_text(face = "italic", size = 10)) +
+  theme(plot.title = element_text(face = "bold", size = 10)) +
+  theme(strip.text.y = element_text(size = 15, color = "black"), strip.background = element_rect(colour = "lightgrey",fill = "lightgrey",size = 1.5,linetype = "solid"))
+dev.off()
+```
